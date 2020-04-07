@@ -15,6 +15,7 @@ struct Gadget {
     addr: u64
 }
 
+
 fn is_cflow_group(g: u32) -> bool {
     g == CS_GRP_JUMP || g == CS_GRP_CALL
         || g == CS_GRP_RET || g == CS_GRP_IRET
@@ -30,6 +31,7 @@ fn is_cflow_ins(detail: &InsnDetail) -> bool {
     false
 }
 
+
 fn is_ret_ins(id: u32) -> bool {
     id == X86_INS_RET as u32
 }
@@ -43,7 +45,6 @@ fn update_len(len: &mut usize) -> usize {
 
 fn find_gadgets_at_root(text: &[u8], root: u64, vma: u64, cs: &Capstone,
                         gadgets: &mut Vec<Gadget>) {
-
     let (mut len, mut n): (usize, usize);
     let (mut pc, mut offset, mut addr): (u64, u64, u64);
     let mut gadget_string: String;
@@ -92,15 +93,12 @@ fn find_gadgets_at_root(text: &[u8], root: u64, vma: u64, cs: &Capstone,
                 );
                 break;
             }
-
             gadget_string.push(';');
-
         }
-
         a -= 1;
     }
-
 }
+
 
 fn main() {
     let mut cs = Capstone::new()
