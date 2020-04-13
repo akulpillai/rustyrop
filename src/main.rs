@@ -17,7 +17,7 @@ use capstone::arch::x86::X86Insn::*;
 #[derive(Debug)]
 struct Gadget {
     instrs: String,
-    addr: u64
+    addr: u64,
 }
 
 struct TextSection {
@@ -29,7 +29,11 @@ struct TextSection {
 enum BinFormat {
     MachO32,
     MachO64,
-    ELF
+    ELF,
+}
+
+struct Amd64<'a> {
+    section: &'a TextSection,
 }
 
 // enum Arch {
@@ -113,10 +117,7 @@ fn update_len(len: &mut usize) -> usize {
     *len
 }
 
-struct Amd64 {}
-
-impl Amd64 {
-
+impl Amd64<'_> {
     fn is_cflow_group(&self, g: u32) -> bool {
         g == CS_GRP_JUMP || g == CS_GRP_CALL ||
             g == CS_GRP_RET || g == CS_GRP_IRET
@@ -135,7 +136,7 @@ impl Amd64 {
         id == X86_INS_RET as u32
     }
 
-    fn find_gadgets_at_root(&self, text: &[u8], root: u64, vma: u64,
+    fn find_gadgets_at_root(&self,root: u64, vma: u64,
                             cs: &Capstone, gadgets: &mut Vec<Gadget>) {
         let (mut len, mut n): (usize, usize);
         let (mut offset, mut addr): (u64, u64);
@@ -149,11 +150,12 @@ impl Amd64 {
         while (a >= root - root_offset) && a >= vma {
             addr = a;
             offset = addr - vma;
-            n = (text.len() as u64 - offset).try_into().unwrap();
+            n = (self.section.data.len() as u64 - offset).try_into().unwrap();
             len = 0;
             gadget_string = String::from("");
             let insns = cs.disasm_all(
-                &text[offset as usize..(offset as usize + n) as usize], addr)
+                &self.section.data[offset as usize..(offset as usize + n)],
+                addr)
                 .expect("Disassembly failure");
 
             for i in insns.iter() {
@@ -202,7 +204,7 @@ impl Amd64 {
         Ok(cs)
     }
 
-    fn scan_gadgets(&self, section: TextSection)
+    fn scan_gadgets(&self)
                     -> Result<Vec<Gadget>, io::Error> {
         let cs = self.init_capstone().unwrap();
 
@@ -210,11 +212,10 @@ impl Amd64 {
         let x86_opc_ret: u8 = 0xc3;
 
 
-        for i in 0 as usize..section.size {
-            if section.data[i] == x86_opc_ret {
-                self.find_gadgets_at_root(&section.data,
-                                          section.addr + i as u64,
-                                          section.addr as u64, &cs,
+        for i in 0 as usize..self.section.size {
+            if self.section.data[i] == x86_opc_ret {
+                self.find_gadgets_at_root(self.section.addr + i as u64,
+                                          self.section.addr as u64, &cs,
                                           &mut gadgets);
             }
         }
@@ -246,10 +247,14 @@ fn main() {
         }
     };
 
-    let gadgets = Amd64::scan_gadgets(&Amd64 {},section).unwrap();
+    let amd64 = Amd64 {
+        section: &section,
+    };
+
+    let gadgets = amd64.scan_gadgets().unwrap();
 
     for i in gadgets.iter() {
-        println!("0x{:016x}: {}", i.addr, i.instrs);
+        println!("{:#018x}: {}", i.addr, i.instrs);
     }
     println!("Found {} Gadgets", gadgets.len());
 }
