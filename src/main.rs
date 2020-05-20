@@ -112,11 +112,6 @@ fn get_text_section_elf(fname: &str) -> Result<TextSection, io::Error> {
     })
 }
 
-fn update_len(len: &mut usize) -> usize {
-    *len += 1;
-    *len
-}
-
 impl Amd64<'_> {
     fn is_cflow_group(&self, g: u32) -> bool {
         g == CS_GRP_JUMP || g == CS_GRP_CALL ||
@@ -142,7 +137,7 @@ impl Amd64<'_> {
         let (mut offset, mut addr): (u64, u64);
         let mut gadget_string: String;
 
-        let max_gadget_len: u64 = 5;
+        let max_gadget_len: u64 = 10;
         let max_ins_bytes: u64 = 15;
         let root_offset: u64 = max_gadget_len * max_ins_bytes;
 
@@ -153,16 +148,25 @@ impl Amd64<'_> {
             n = (self.section.data.len() as u64 - offset).try_into().unwrap();
             len = 0;
             gadget_string = String::from("");
-            let insns = cs.disasm_all(
-                &self.section.data[offset as usize..(offset as usize + n)],
-                addr)
-                .expect("Disassembly failure");
+            let mut prev_ins_size = 0;
+            while prev_ins_size < n {
+                let insns = cs.disasm_count(
+                    &self.section.data[(offset as usize + prev_ins_size)
+                                       ..(offset as usize + n)],
+                    addr, 1)
+                    .expect("Disassembly failure");
 
-            for i in insns.iter() {
+                if insns.is_empty() {
+                    break;
+                }
+
+                let i = insns.iter().next().unwrap();
+                prev_ins_size += i.bytes().len();
+
                 let ins_str: String = String::from(format!("{}", i));
                 let gadget_ins = ins_str.split(": ").collect::<Vec<&str>>()[1];
                 let detail: InsnDetail = cs.insn_detail(&i)
-                    .expect("Failed to get intruction details");
+                    .expect("Failed to get instruction details");
 
                 if i.id().0 == X86_INS_INVALID as u32 || i.bytes().len() == 0 {
                     break;
@@ -172,14 +176,20 @@ impl Amd64<'_> {
                     !self.is_ret_ins(i.id().0)
                 {
                     break;
-                } else if update_len(&mut len) > max_gadget_len as usize {
-                    break;
+                } else {
+                    len += 1;
+                    if len > max_gadget_len as usize {
+                        break;
+                    }
                 }
 
                 gadget_string.push(' ');
                 gadget_string.push_str(gadget_ins);
 
-                if i.address() == root {
+                // disasm_count() returns incorrect addresses when used like
+                // this so we add prev_ins_size to correct the offset
+                if i.address() + prev_ins_size as u64 == root {
+                    gadget_string.push_str("; ret");
                     gadgets.push( Gadget {
                         instrs: gadget_string,
                         addr: a
@@ -199,7 +209,7 @@ impl Amd64<'_> {
             .mode(arch::x86::ArchMode::Mode64)
             .build()
             .expect("Failed to create capstone handle");
-        cs.set_detail(true)?;
+        cs.set_detail(true).unwrap();
 
         Ok(cs)
     }
