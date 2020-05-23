@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use capstone::InsnGroupType::*;
 use capstone::arch::x86::X86Insn::*;
 
+use colored::*;
+
 #[derive(Debug)]
 struct Gadget {
     instrs: String,
@@ -264,7 +266,8 @@ fn main() {
     let gadgets = amd64.scan_gadgets().unwrap();
 
     for i in gadgets.iter() {
-        println!("{:#018x}: {}", i.addr, i.instrs);
+        println!("{}: {}", String::from(format!("{:#018x}",i.addr)).yellow(),
+                 i.instrs.blue());
     }
     println!("Found {} Gadgets", gadgets.len());
 }
