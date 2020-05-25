@@ -1,10 +1,5 @@
-extern crate capstone;
-extern crate macho;
-extern crate elf;
-
 use capstone::prelude::*;
 use std::io;
-use std::env;
 use std::fs;
 use std::io::Read;
 use std::error::Error;
@@ -15,6 +10,7 @@ use capstone::InsnGroupType::*;
 use capstone::arch::x86::X86Insn::*;
 
 use colored::*;
+use clap::{Arg, App};
 
 #[derive(Debug)]
 struct Gadget {
@@ -36,6 +32,7 @@ enum BinFormat {
 
 struct Amd64<'a> {
     section: &'a TextSection,
+    gadget_length: u64,
 }
 
 // enum Arch {
@@ -115,6 +112,10 @@ fn get_text_section_elf(fname: &str) -> Result<TextSection, io::Error> {
 }
 
 impl Amd64<'_> {
+    fn new(section: &TextSection, length: u64) -> Amd64 {
+        Amd64 {section: &section, gadget_length: length}
+    }
+
     fn is_cflow_group(&self, g: u32) -> bool {
         g == CS_GRP_JUMP || g == CS_GRP_CALL ||
             g == CS_GRP_RET || g == CS_GRP_IRET
@@ -139,11 +140,12 @@ impl Amd64<'_> {
         let (mut offset, mut addr): (u64, u64);
         let mut gadget_string: String;
 
-        let max_gadget_len: u64 = 10;
+        let max_gadget_len: u64 = self.gadget_length;
         let max_ins_bytes: u64 = 15;
         let root_offset: u64 = max_gadget_len * max_ins_bytes;
 
         let mut a: u64 = root - 1;
+        // TODO: check for subtract with overflow
         while (a >= root - root_offset) && a >= vma {
             addr = a;
             offset = addr - vma;
@@ -165,12 +167,12 @@ impl Amd64<'_> {
                 let i = insns.iter().next().unwrap();
                 prev_ins_size += i.bytes().len();
 
-                let ins_str: String = String::from(format!("{}", i));
+                let ins_str: String = format!("{}", i);
                 let gadget_ins = ins_str.split(": ").collect::<Vec<&str>>()[1];
                 let detail: InsnDetail = cs.insn_detail(&i)
                     .expect("Failed to get instruction details");
 
-                if i.id().0 == X86_INS_INVALID as u32 || i.bytes().len() == 0 {
+                if i.id().0 == X86_INS_INVALID as u32 || i.bytes().is_empty() {
                     break;
                 } else if i.address() > root {
                     break;
@@ -216,8 +218,7 @@ impl Amd64<'_> {
         Ok(cs)
     }
 
-    fn scan_gadgets(&self)
-                    -> Result<Vec<Gadget>, io::Error> {
+    fn scan_gadgets(&self) -> Result<Vec<Gadget>, io::Error> {
         let cs = self.init_capstone().unwrap();
 
         let mut gadgets: Vec<Gadget> = Vec::new();
@@ -233,17 +234,32 @@ impl Amd64<'_> {
         }
         Ok(gadgets)
     }
-
 }
 
-fn main() {
-    let args: Vec<_> = env::args().collect();
-    if args.len() != 2 {
-        println!("Usage: {} <file>", args[0]);
-        return;
-    }
 
-    let path = &args[1];
+fn main() {
+    let matches = App::new("rustyrop")
+        .version("0.1")
+        .author("Akul Pillai <contact@akulpillai.com>")
+        .about("ROP Gadget Scanner")
+        .arg(Arg::with_name("length")
+             .short("l")
+             .value_name("length")
+             .help("Specify maximum gadget length, default=5"))
+        .arg(Arg::with_name("file")
+             .required(true)
+             .index(1))
+        .get_matches();
+
+    let path = matches.value_of("file").unwrap();
+    let gadget_length: u64;
+
+    if matches.is_present("length") {
+        gadget_length = matches.value_of("length").unwrap()
+            .parse::<u64>().unwrap();
+    } else {
+        gadget_length = 5;
+    }
 
     let file_format = find_binary_format(path).unwrap();
 
@@ -259,15 +275,14 @@ fn main() {
         }
     };
 
-    let amd64 = Amd64 {
-        section: &section,
-    };
-
-    let gadgets = amd64.scan_gadgets().unwrap();
+    // TODO: check architecture, error out if not amd64.
+    // use match operator here to add support for other architectures.
+    let gadgets = Amd64::new(&section, gadget_length).scan_gadgets().unwrap();
 
     for i in gadgets.iter() {
-        println!("{}: {}", String::from(format!("{:#018x}",i.addr)).yellow(),
+        println!("{}: {}", format!("{:#018x}",i.addr).yellow(),
                  i.instrs.blue());
     }
+
     println!("Found {} Gadgets", gadgets.len());
 }
